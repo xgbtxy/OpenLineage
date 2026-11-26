@@ -472,3 +472,66 @@ fn first_cte_with_its_own_with_keeps_the_tables_of_its_nested_ctes() {
         assert_eq!(in_tables(sql, dialect), vec!["src"], "{dialect}: {sql}");
     }
 }
+
+#[test]
+fn redshift_folds_quoted_and_unquoted_cte_names_and_mysql_matches_verbatim() {
+    assert_eq!(
+        in_tables(
+            "WITH \"Orders\" AS (SELECT id FROM src) INSERT INTO tgt SELECT id FROM orders",
+            "redshift"
+        ),
+        vec!["src"]
+    );
+    assert_eq!(
+        in_tables(
+            "WITH Orders AS (SELECT id FROM src) INSERT INTO tgt SELECT id FROM \"orders\"",
+            "redshift"
+        ),
+        vec!["src"]
+    );
+    assert_eq!(
+        in_tables(
+            "WITH Orders AS (SELECT id FROM src) INSERT INTO tgt SELECT id FROM orders",
+            "mysql"
+        ),
+        vec!["orders"]
+    );
+    assert_eq!(
+        in_tables(
+            "WITH Orders AS (SELECT id FROM src) INSERT INTO tgt SELECT id FROM Orders",
+            "mysql"
+        ),
+        vec!["src"]
+    );
+}
+
+#[test]
+fn same_case_qualified_source_and_recursive_cte_stay_distinct() {
+    assert_eq!(
+        in_tables_with_default_schema(
+            "WITH RECURSIVE orders AS \
+             (SELECT * FROM public.orders UNION ALL SELECT * FROM orders) \
+             INSERT INTO target SELECT * FROM orders",
+            "postgres",
+            "public"
+        ),
+        vec!["public.orders"]
+    );
+}
+
+#[test]
+fn nested_recursive_ctes_preserve_outer_self_reference() {
+    assert_eq!(
+        in_tables(
+            "WITH RECURSIVE OuterCte AS (\
+                WITH RECURSIVE InnerCte AS (\
+                    SELECT id FROM src UNION ALL SELECT id FROM innercte\
+                ) \
+                SELECT id FROM innercte UNION ALL SELECT id FROM outercte\
+             ) \
+             INSERT INTO tgt SELECT id FROM outercte",
+            "postgres"
+        ),
+        vec!["src"]
+    );
+}
